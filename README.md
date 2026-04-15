@@ -112,16 +112,50 @@ dotnet run --project ManagedIdentityDemo
 
 ---
 
-## Editing the User-Assigned Identity Client ID
+## Setting Up the User-Assigned Managed Identity
 
-If your VM has a **user-assigned managed identity**, open `ManagedIdentityDemo/Program.cs` and replace:
+Demo 2 requires a **user-assigned managed identity** attached to your VM. Follow these steps to create one and assign it:
+
+### Step 1: Create a User-Assigned Managed Identity
+
+1. Go to the [**User-Assigned Managed Identities**](https://portal.azure.com/#browse/Microsoft.ManagedIdentity%2FuserAssignedIdentities) page in the Azure portal
+2. Click **+ Create**
+3. Select your **Subscription** and **Resource group** (use the same resource group as your VM)
+4. Select a **Region** (use the same region as your VM)
+5. Enter a **Name** for the identity (e.g. `my-demo-identity`)
+6. Click **Review + create** → **Create**
+
+### Step 2: Copy the Client ID
+
+1. Once created, open the managed identity resource
+2. On the **Overview** page, copy the **Client ID** (a GUID like `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
+
+### Step 3: Assign the Identity to Your VM
+
+1. Go to your **Virtual Machine** in the Azure portal
+2. In the left menu, go to **Settings** → **Identity**
+3. Switch to the **User assigned** tab
+4. Click **+ Add**
+5. Search for and select the managed identity you created in Step 1
+6. Click **Add**
+
+### Step 4: Update the Code with Your Client ID
+
+Open `ManagedIdentityDemo/Program.cs` and replace the existing client ID:
 
 ```csharp
-var userAssignedClientId = "YOUR-USER-ASSIGNED-CLIENT-ID";
+var userAssignedClientId = "0350a2e9-d8dd-4d61-bfb8-c48115fbfc9e";
 ```
 
-with your actual Client ID from the Azure portal:
-**Managed Identity → Properties → Client ID**
+with the **Client ID** you copied in Step 2.
+
+### Step 5: Run the Demo Again
+
+```bash
+dotnet run --project ManagedIdentityDemo
+```
+
+Both Demo 1 (System-Assigned) and Demo 2 (User-Assigned) should now succeed.
 
 ---
 
