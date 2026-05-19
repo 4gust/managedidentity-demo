@@ -159,13 +159,66 @@ Both Demo 1 (System-Assigned) and Demo 2 (User-Assigned) should now succeed.
 
 ---
 
+## Setting Up Graph API Permissions (Demo 3)
+
+Demo 3 calls the **Microsoft Graph API** using the managed identity. For this to work, the identity needs **application permissions** on Microsoft Graph.
+
+### Step 1: Find Your Managed Identity's Object ID
+
+1. Go to your **Virtual Machine** in the Azure portal
+2. Go to **Settings** → **Identity** → **System assigned** tab
+3. Copy the **Object (principal) ID**
+
+### Step 2: Grant Graph API Permissions via Azure Cloud Shell
+
+Since application permissions on Microsoft Graph can only be granted via PowerShell/CLI (not the portal UI), open **Azure Cloud Shell** (PowerShell) and run:
+
+```powershell
+# Install the Microsoft Graph PowerShell module if not already installed
+Install-Module Microsoft.Graph -Scope CurrentUser -Force
+
+# Connect to Graph with admin consent
+Connect-MgGraph -Scopes "AppRoleAssignment.ReadWrite.All"
+
+# Set your managed identity's Object ID (from Step 1)
+$miObjectId = "<YOUR-MANAGED-IDENTITY-OBJECT-ID>"
+
+# Get the Microsoft Graph service principal
+$graphSP = Get-MgServicePrincipal -Filter "displayName eq 'Microsoft Graph'" | Select-Object -First 1
+
+# Find the Organization.Read.All app role
+$appRole = $graphSP.AppRoles | Where-Object { $_.Value -eq "Organization.Read.All" }
+
+# Grant the permission
+New-MgServicePrincipalAppRoleAssignment `
+    -ServicePrincipalId $miObjectId `
+    -PrincipalId $miObjectId `
+    -ResourceId $graphSP.Id `
+    -AppRoleId $appRole.Id
+```
+
+### Step 3: Run the Demo
+
+```bash
+dotnet run --project ManagedIdentityDemo
+```
+
+Demo 3 should now show your **tenant name**, **tenant ID**, and **verified domains** from Microsoft Graph.
+
+> **Note:** If you get a `403 Forbidden` error, the permission grant may take a few minutes to propagate. Wait and try again.
+
+---
+
 ## What the code does
 
 | Step | Description |
 |------|-------------|
 | 1 | Creates an MSAL managed identity app using `ManagedIdentityApplicationBuilder` |
-| 2 | Requests an access token for Azure Resource Manager |
+| 2 | Requests an access token for Azure Resource Manager (Demo 1 & 2) |
 | 3 | MSAL calls the Azure IMDS endpoint (`169.254.169.254`) on the VM |
 | 4 | Prints the token details |
+| 5 | Acquires a second token scoped to Microsoft Graph (Demo 3) |
+| 6 | Calls `GET /organization` on the Graph API using the token as a Bearer header |
+| 7 | Parses the JSON response and prints tenant info |
 
 The token can be used as a **Bearer token** in HTTP requests to Azure APIs — no passwords or secrets needed.

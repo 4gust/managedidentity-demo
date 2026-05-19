@@ -1,5 +1,7 @@
 ﻿// MSAL.NET (Microsoft Authentication Library) is the official library for acquiring tokens
 // from the Microsoft identity platform (Azure AD / Entra ID).
+using System.Net.Http.Headers;
+using System.Text.Json;
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.AppConfig;
 
@@ -76,7 +78,7 @@ catch (MsalServiceException ex)
 // Find it in the Azure portal: Managed Identity → Properties → Client ID
 
 // Replace this with your actual user-assigned managed identity Client ID
-var userAssignedClientId = "YOUR-USER-ASSIGNED-CLIENT-ID";
+var userAssignedClientId = "0350a2e9-d8dd-4d61-bfb8-c48115fbfc9e";
 
 // Instead of ManagedIdentityId.SystemAssigned, we pass the Client ID
 // of the specific user-assigned identity we want to use.
@@ -112,6 +114,130 @@ catch (MsalServiceException ex)
     //   - The user-assigned identity is not attached to this VM
     //   - The identity doesn't have the required permissions on the target resource
     Console.WriteLine($"User-Assigned MI failed: {ex.Message}");
+}
+
+// =====================================================================
+// --- Demo 3: Calling Azure REST API with the Token ---
+// =====================================================================
+// Now let's go beyond just acquiring a token — let's actually USE it!
+// We'll call the Azure Resource Manager (ARM) REST API to list
+// subscriptions and resource groups — proving the token works.
+//
+// The managed identity already has access to ARM (we got a token in Demo 1),
+// so this works immediately — no extra permissions or setup needed.
+
+try
+{
+    Console.WriteLine();
+    Console.WriteLine("========================================");
+    Console.WriteLine(" Demo 3: Calling Azure REST API");
+    Console.WriteLine("========================================");
+    Console.WriteLine();
+
+    // We already proved we can get an ARM token in Demo 1.
+    // Now let's actually USE that token to call the ARM API.
+    var armApp = ManagedIdentityApplicationBuilder
+        .Create(ManagedIdentityId.SystemAssigned)
+        .Build();
+
+    var armResult = await armApp.AcquireTokenForManagedIdentity(scope).ExecuteAsync();
+
+    using var httpClient = new HttpClient();
+
+    // Attach the token as a Bearer token in the Authorization header.
+    // This is the standard OAuth 2.0 pattern for calling protected APIs:
+    //   Authorization: Bearer eyJ0eXAiOiJKV1Q...
+    httpClient.DefaultRequestHeaders.Authorization =
+        new AuthenticationHeaderValue("Bearer", armResult.AccessToken);
+
+    // --- Call 1: List Tenants ---
+    // GET /tenants always returns data — every identity belongs to a tenant.
+    // No role assignments needed, just a valid ARM token.
+    Console.WriteLine("Calling ARM API: GET /tenants ...");
+    var tenantResponse = await httpClient.GetAsync(
+        "https://management.azure.com/tenants?api-version=2022-12-01");
+
+    if (tenantResponse.IsSuccessStatusCode)
+    {
+        var tenantJson = await tenantResponse.Content.ReadAsStringAsync();
+        using var tenantDoc = JsonDocument.Parse(tenantJson);
+        var tenants = tenantDoc.RootElement.GetProperty("value");
+
+        Console.WriteLine($"Found {tenants.GetArrayLength()} tenant(s):");
+        foreach (var tenant in tenants.EnumerateArray())
+        {
+            var tenantId = tenant.GetProperty("tenantId").GetString();
+            var displayName = tenant.TryGetProperty("displayName", out var dn) ? dn.GetString() : "(unnamed)";
+            Console.WriteLine($"  - {displayName}");
+            Console.WriteLine($"    Tenant ID: {tenantId}");
+        }
+    }
+    else
+    {
+        Console.WriteLine($"Tenants call failed: {tenantResponse.StatusCode}");
+    }
+
+    // --- Call 2: List Subscriptions ---
+    // GET /subscriptions returns all Azure subscriptions this identity can see.
+    // This requires no extra role assignments — just a valid ARM token.
+    Console.WriteLine();
+    Console.WriteLine("Calling ARM API: GET /subscriptions ...");
+    var subsResponse = await httpClient.GetAsync(
+        "https://management.azure.com/subscriptions?api-version=2022-12-01");
+
+    if (subsResponse.IsSuccessStatusCode)
+    {
+        var json = await subsResponse.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(json);
+        var subscriptions = doc.RootElement.GetProperty("value");
+
+        Console.WriteLine($"Found {subscriptions.GetArrayLength()} subscription(s):");
+        foreach (var sub in subscriptions.EnumerateArray())
+        {
+            var name = sub.GetProperty("displayName").GetString();
+            var subId = sub.GetProperty("subscriptionId").GetString();
+            var state = sub.GetProperty("state").GetString();
+            Console.WriteLine($"  - {name}");
+            Console.WriteLine($"    ID:    {subId}");
+            Console.WriteLine($"    State: {state}");
+
+            // --- Call 2: List Resource Groups in this subscription ---
+            // This shows how you'd chain API calls using the same token.
+            Console.WriteLine();
+            Console.WriteLine($"  Listing resource groups in '{name}'...");
+            var rgResponse = await httpClient.GetAsync(
+                $"https://management.azure.com/subscriptions/{subId}/resourcegroups?api-version=2024-03-01");
+
+            if (rgResponse.IsSuccessStatusCode)
+            {
+                var rgJson = await rgResponse.Content.ReadAsStringAsync();
+                using var rgDoc = JsonDocument.Parse(rgJson);
+                var groups = rgDoc.RootElement.GetProperty("value");
+
+                Console.WriteLine($"  Found {groups.GetArrayLength()} resource group(s):");
+                foreach (var rg in groups.EnumerateArray())
+                {
+                    var rgName = rg.GetProperty("name").GetString();
+                    var location = rg.GetProperty("location").GetString();
+                    Console.WriteLine($"    - {rgName} ({location})");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"  Could not list resource groups: {rgResponse.StatusCode}");
+            }
+        }
+    }
+    else
+    {
+        var errorBody = await subsResponse.Content.ReadAsStringAsync();
+        Console.WriteLine($"ARM API call failed: {subsResponse.StatusCode}");
+        Console.WriteLine($"  Response: {errorBody}");
+    }
+}
+catch (MsalServiceException ex)
+{
+    Console.WriteLine($"ARM API call failed: {ex.Message}");
 }
 
 Console.WriteLine();
